@@ -11,13 +11,21 @@
   <style>
     body { font-family: -apple-system, sans-serif; background: #1a1a2e; color: white; text-align: center; margin: 0; padding: 20px; }
     h2 { color: #00d2ff; margin-bottom: 5px; }
-    #webcam-container { width: 280px; height: 280px; margin: 20px auto; border-radius: 20px; overflow: hidden; border: 3px solid #2ecc71; background: #000; box-shadow: 0 0 15px rgba(46, 204, 113, 0.3); }
-    canvas { width: 100%; height: 100%; object-fit: cover; }
+    
+    /* 替換為原生影片容器 */
+    #video-container { 
+      width: 280px; height: 280px; margin: 20px auto; border-radius: 20px; 
+      overflow: hidden; border: 3px solid #2ecc71; background: #000; 
+      box-shadow: 0 0 15px rgba(46, 204, 113, 0.3); position: relative;
+    }
+    /* 原生影片標籤設定：填滿容器、不鏡像(後置鏡頭) */
+    video { width: 100%; height: 100%; object-fit: cover; }
+    
     .action-btn { width: 90%; max-width: 300px; padding: 18px; border-radius: 50px; border: none; font-size: 18px; font-weight: bold; color: white; cursor: pointer; margin: 10px 0; transition: 0.3s; }
     #btn-init { background: #3498db; }
     #btn-save { background: #e74c3c; display: none; }
-    #status { font-size: 16px; color: #f1c40f; margin-top: 10px; min-height: 30px; }
-    #label-container { margin-top: 10px; font-size: 22px; color: white; font-weight: bold; }
+    #status { font-size: 16px; color: #f1c40f; margin-top: 10px; min-height: 30px; font-weight: bold; }
+    #label-container { margin-top: 10px; font-size: 24px; color: white; font-weight: bold; }
   </style>
 </head>
 <body>
@@ -25,71 +33,82 @@
   <h2>🌊 淡水河 AI 守護者</h2>
   <div id="status">準備就緒，請啟動系統</div>
 
-  <div id="webcam-container"></div>
+  <div id="video-container">
+    <video id="raw-video" playsinline autoplay muted></video>
+  </div>
+  
   <div id="label-container">等待辨識...</div>
 
   <button id="btn-init" class="action-btn" onclick="init()">📸 1. 啟動環境掃描鏡頭</button>
   <button id="btn-save" class="action-btn" onclick="triggerSave()">🚨 2. 紀錄目前畫面垃圾</button>
 
 <script>
-  // 🔴 這裡請貼上您原本的「淡水河垃圾圖片辨識」模型網址
-  const URL = "https://teachablemachine.withgoogle.com/models/請替換成您的模型ID/";
+  // 🔴 請替換為您「淡水河垃圾辨識」的模型網址
+  const MODEL_URL = "https://teachablemachine.withgoogle.com/models/請替換為您的模型ID/";
   
-  // 🔴 您的專屬 GAS API 網址
+  // 🟢 您的專屬 GAS API 網址 (已填入)
   const GAS_URL = "https://script.google.com/macros/s/AKfycby8s6DKAGqcZqk9_cUyCC-L_vx90AkWX380JZeFXfYLyTG9HWz2yNnBf_JKQ2jR9Gu5/exec";
   
-  let model, webcam, labelContainer, maxPredictions;
+  let model, video, maxPredictions;
   let currentLabel = "", currentScore = 0;
 
   async function init() {
     const status = document.getElementById("status");
     const btnInit = document.getElementById("btn-init");
-    btnInit.innerHTML = "⏳ 模型載入中...";
+    btnInit.innerHTML = "啟動中...";
     btnInit.disabled = true;
 
     try {
-      model = await tmImage.load(URL + "model.json", URL + "metadata.json");
-      maxPredictions = model.getTotalClasses();
-
-      const flip = false; // 後置鏡頭不反轉
-      webcam = new tmImage.Webcam(280, 280, flip);
-      await webcam.setup({ facingMode: "environment" }); 
-      if(webcam.webcam) { webcam.webcam.setAttribute('playsinline', ''); webcam.webcam.muted = true; }
+      // 1. 繞過 AI 套件，直接用原生語法呼叫後置主鏡頭
+      status.innerText = "1/2 正在請求相機權限...";
+      video = document.getElementById("raw-video");
       
-      await webcam.play();
-      window.requestAnimationFrame(loop);
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { facingMode: "environment" }, 
+        audio: false 
+      });
+      video.srcObject = stream;
 
-      document.getElementById("webcam-container").appendChild(webcam.canvas);
-      labelContainer = document.getElementById("label-container");
+      // 等待影片串流真實播放
+      await new Promise((resolve) => {
+        video.onloadedmetadata = () => { video.play(); resolve(); };
+      });
+
+      // 2. 鏡頭成功開啟後，再載入 AI 模型
+      status.innerText = "2/2 相機已開啟，載入 AI 模型...";
+      model = await tmImage.load(MODEL_URL + "model.json", MODEL_URL + "metadata.json");
+      maxPredictions = model.getTotalClasses();
 
       btnInit.style.display = "none";
       document.getElementById("btn-save").style.display = "inline-block";
-      status.innerText = "✅ 掃描中，請對準目標";
+      status.innerText = "✅ 掃描中，請對準垃圾";
       status.style.color = "#2ecc71";
+      
+      // 開始辨識
+      window.requestAnimationFrame(loop);
+
     } catch (e) {
-      status.innerHTML = `❌ 啟動失敗，請確認已允許相機權限。`;
-      btnInit.disabled = false; btnInit.innerHTML = "重試啟動";
+      status.innerHTML = `<span style="color:#ff4d4d">❌ 啟動失敗: ${e.name}</span><br>相機無法開啟，請確認 Safari 權限。`;
+      btnInit.disabled = false;
+      btnInit.innerHTML = "重試啟動";
     }
   }
 
   async function loop() {
-    webcam.update();
-    await predict();
+    if (video.readyState >= 2) {
+      // 直接把原生影片塞給模型辨識
+      const prediction = await model.predict(video);
+      let best = prediction.reduce((a, b) => a.probability > b.probability ? a : b);
+      
+      currentLabel = best.className;
+      currentScore = best.probability.toFixed(2);
+      
+      document.getElementById("label-container").innerText = `${currentLabel} (${(currentScore * 100).toFixed(0)}%)`;
+    }
     window.requestAnimationFrame(loop);
   }
 
-  async function predict() {
-    const prediction = await model.predict(webcam.canvas);
-    let best = prediction.reduce((a, b) => a.probability > b.probability ? a : b);
-    
-    currentLabel = best.className;
-    currentScore = best.probability.toFixed(2);
-    
-    labelContainer.innerText = `${currentLabel} (${(currentScore * 100).toFixed(0)}%)`;
-  }
-
   function triggerSave() {
-    // 若信心度太低，不給存檔
     if (currentScore < 0.6) {
       alert("⚠️ 系統無法確認，請靠近一點再紀錄！");
       return;
@@ -106,7 +125,7 @@
     fetch(requestUrl, { mode: 'no-cors' })
       .then(() => {
         alert("✅ 垃圾紀錄已成功上傳至試算表！");
-        document.getElementById("status").innerText = "✅ 掃描中，請對準目標";
+        document.getElementById("status").innerText = "✅ 掃描中，請對準垃圾";
         document.getElementById("btn-save").disabled = false;
       })
       .catch(error => {
