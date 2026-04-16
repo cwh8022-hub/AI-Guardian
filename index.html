@@ -1,0 +1,17 @@
+function saveRiverData(label, score) {
+    document.getElementById("status").innerText = "💾 紀錄上傳中...";
+    
+    // 🔴 貼上同一個 GAS API 網址 🔴
+    const GAS_URL = "https://script.google.com/macros/s/您的專屬ID/exec";
+    
+    // 打包資料發送 (注意 type=river)
+    const requestUrl = `${GAS_URL}?type=river&label=${encodeURIComponent(label)}&score=${score}`;
+    
+    fetch(requestUrl)
+      .then(response => response.json())
+      .then(data => {
+        alert("垃圾紀錄已上傳成功！");
+        // 恢復掃描狀態或重新整理
+      })
+      .catch(error => alert("傳送失敗！"));
+  }

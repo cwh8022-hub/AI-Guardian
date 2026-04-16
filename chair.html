@@ -1,0 +1,25 @@
+// 取代原本的 google.script.run
+  function saveData(name, c) {
+    document.getElementById("status").innerText = "💾 正在傳送資料至雲端...";
+    
+    // 🔴 請將下方網址替換成您剛剛在 GAS 複製的 API 網址 🔴
+    const GAS_URL = "https://script.google.com/macros/s/AKfycby8s6DKAGqcZqk9_cUyCC-L_vx90AkWX380JZeFXfYLyTG9HWz2yNnBf_JKQ2jR9Gu5/exec";
+    
+    // 打包資料發送 (注意 type=chair)
+    const requestUrl = `${GAS_URL}?type=chair&name=${encodeURIComponent(name)}&count=${c}`;
+    
+    fetch(requestUrl)
+      .then(response => response.json())
+      .then(data => {
+        if (data.status === "success") {
+          alert("測驗結束！" + name + " 完成 " + c + " 次。\n資料已存入試算表！");
+        } else {
+          alert("儲存出現異常：" + data.message);
+        }
+        location.reload(); 
+      })
+      .catch(error => {
+        alert("傳送失敗，請檢查網路連線。");
+        document.getElementById("status").innerText = "❌ 傳送失敗";
+      });
+  }
