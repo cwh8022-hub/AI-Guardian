@@ -1,25 +1,157 @@
-// 取代原本的 google.script.run
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>AI 30秒椅子站立檢測</title>
+  
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.3.1/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/pose@0.8/dist/teachablemachine-pose.min.js"></script>
+
+  <style>
+    :root { --bg-color: #1a1a2e; --accent-blue: #00d2ff; --accent-green: #2ecc71; }
+    body { font-family: -apple-system, sans-serif; background: var(--bg-color); color: white; margin: 0; padding: 15px; text-align: center; }
+    .timer-display { font-size: 55px; color: #f1c40f; font-weight: bold; margin: 5px 0; }
+    .count-display { font-size: 30px; color: var(--accent-blue); margin-bottom: 15px; }
+
+    #webcam-container {
+      width: 260px; height: 260px; border-radius: 20px; background: #000;
+      overflow: hidden; position: relative; margin: 0 auto 15px;
+      border: 2px solid rgba(0, 210, 255, 0.5); box-shadow: 0 0 15px rgba(0, 210, 255, 0.2);
+    }
+    canvas { width: 100%; height: 100%; object-fit: cover; }
+
+    .name-input {
+      width: 80%; max-width: 300px; padding: 12px; border-radius: 50px; border: 1px solid rgba(255,255,255,0.2);
+      background: rgba(255,255,255,0.1); color: white; text-align: center; margin-bottom: 15px; font-size: 16px;
+    }
+
+    .action-btn { width: 85%; max-width: 300px; padding: 16px; border-radius: 50px; border: none; font-size: 18px; font-weight: bold; color: white; cursor: pointer; margin: 8px 0; }
+    #btn-init { background: linear-gradient(135deg, #00d2ff 0%, #3a7bd5 100%); }
+    #btn-start { background: linear-gradient(135deg, #2ecc71 0%, #27ae60 100%); display: none; }
+    #status { font-size: 14px; color: var(--accent-blue); margin-top: 10px; min-height: 40px; }
+  </style>
+</head>
+<body>
+
+  <h2 style="margin-top:5px; color:#fff;">🪑 30秒椅子站立檢測</h2>
+  
+  <div class="timer-display" id="timer">30.0</div>
+  <div class="count-display">完成次數：<span id="count-val">0</span></div>
+  
+  <div id="webcam-container"></div>
+  
+  <input type="text" id="p-name" class="name-input" placeholder="👤 輸入受測長者姓名">
+  <div id="status">準備就緒，請點擊啟動</div>
+
+  <button id="btn-init" class="action-btn" onclick="init()">🔵 1. 啟動 AI 相機</button>
+  <button id="btn-start" class="action-btn" onclick="startTest()">🟢 2. 開始測驗</button>
+
+<script>
+  const MODEL_URL = "https://teachablemachine.withgoogle.com/models/m5xSQ1Ixr/";
+  // 🔴 您的專屬 GAS API 網址
+  const GAS_URL = "https://script.google.com/macros/s/AKfycby8s6DKAGqcZqk9_cUyCC-L_vx90AkWX380JZeFXfYLyTG9HWz2yNnBf_JKQ2jR9Gu5/exec";
+  
+  let model, webcam, ctx, count = 0, isTesting = false, hasStoodUp = false, sec = 30.0;
+
+  async function init() {
+    const status = document.getElementById("status");
+    const btn = document.getElementById("btn-init");
+    btn.innerHTML = "⌛ 載入中...";
+    btn.disabled = true;
+
+    try {
+      model = await tmPose.load(MODEL_URL + "model.json", MODEL_URL + "metadata.json");
+      
+      const size = 260;
+      const flip = false; // 後置鏡頭不鏡像
+      webcam = new tmPose.Webcam(size, size, flip); 
+      await webcam.setup({ facingMode: "environment" }); 
+      if(webcam.webcam) { webcam.webcam.setAttribute('playsinline', ''); webcam.webcam.muted = true; }
+      
+      await webcam.play();
+      window.requestAnimationFrame(loop);
+
+      document.getElementById("webcam-container").appendChild(webcam.canvas);
+      ctx = webcam.canvas.getContext("2d");
+
+      btn.style.display = "none";
+      document.getElementById("btn-start").style.display = "inline-block";
+      status.innerText = "✅ 系統就緒：請將鏡頭對準受測者正面";
+      status.style.color = "#2ecc71";
+    } catch (e) {
+      status.innerHTML = `❌ 失敗: 請確認已允許 Safari 相機權限。`;
+      btn.disabled = false; btn.innerHTML = "重試啟動";
+    }
+  }
+
+  async function loop() {
+    webcam.update();
+    await predict();
+    window.requestAnimationFrame(loop);
+  }
+
+  async function predict() {
+    const { pose, posenetOutput } = await model.estimatePose(webcam.canvas);
+    if (pose) {
+      ctx.drawImage(webcam.canvas, 0, 0);
+      tmPose.drawKeypoints(pose.keypoints, 0.5, ctx);
+      tmPose.drawSkeleton(pose.keypoints, 0.5, ctx);
+
+      const prediction = await model.predict(posenetOutput);
+      let stand = prediction.find(p => p.className.includes("站"))?.probability || 0;
+      let sit = prediction.find(p => p.className.includes("坐"))?.probability || 0;
+
+      if (isTesting) {
+        if (stand > 0.90) {
+          if (!hasStoodUp) {
+             hasStoodUp = true;
+             document.getElementById("status").innerText = "⬆️ 已起身，請引導坐下";
+          }
+        } else if (sit > 0.90 && hasStoodUp) {
+          count++;
+          document.getElementById("count-val").innerText = count;
+          hasStoodUp = false;
+          document.getElementById("status").innerText = "⬇️ 已坐下，次數 +1";
+        }
+      }
+    }
+  }
+
+  function startTest() {
+    const name = document.getElementById("p-name").value;
+    if (!name) return alert("請先輸入長者姓名");
+    
+    isTesting = true; count = 0; sec = 30.0; hasStoodUp = false;
+    document.getElementById("btn-start").disabled = true;
+    document.getElementById("p-name").disabled = true;
+
+    const timerIdx = setInterval(() => {
+      sec -= 0.1;
+      document.getElementById("timer").innerText = sec.toFixed(1);
+      if (sec <= 0) {
+        clearInterval(timerIdx);
+        isTesting = false;
+        saveData(name, count);
+      }
+    }, 100);
+  }
+
   function saveData(name, c) {
-    document.getElementById("status").innerText = "💾 正在傳送資料至雲端...";
+    document.getElementById("status").innerText = "💾 正在傳送資料至試算表...";
     
-    // 🔴 請將下方網址替換成您剛剛在 GAS 複製的 API 網址 🔴
-    const GAS_URL = "https://script.google.com/macros/s/AKfycby8s6DKAGqcZqk9_cUyCC-L_vx90AkWX380JZeFXfYLyTG9HWz2yNnBf_JKQ2jR9Gu5/exec";
-    
-    // 打包資料發送 (注意 type=chair)
     const requestUrl = `${GAS_URL}?type=chair&name=${encodeURIComponent(name)}&count=${c}`;
     
-    fetch(requestUrl)
-      .then(response => response.json())
-      .then(data => {
-        if (data.status === "success") {
-          alert("測驗結束！" + name + " 完成 " + c + " 次。\n資料已存入試算表！");
-        } else {
-          alert("儲存出現異常：" + data.message);
-        }
+    fetch(requestUrl, { mode: 'no-cors' })
+      .then(() => {
+        alert(`測驗結束！\n${name} 共完成 ${c} 次。\n資料已送往雲端試算表。`);
         location.reload(); 
       })
       .catch(error => {
-        alert("傳送失敗，請檢查網路連線。");
+        alert("傳送可能有問題，請檢查網路。");
         document.getElementById("status").innerText = "❌ 傳送失敗";
       });
   }
+</script>
+</body>
+</html>
