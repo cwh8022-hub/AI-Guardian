@@ -2,7 +2,7 @@ function saveRiverData(label, score) {
     document.getElementById("status").innerText = "💾 紀錄上傳中...";
     
     // 🔴 貼上同一個 GAS API 網址 🔴
-    const GAS_URL = "https://script.google.com/macros/s/您的專屬ID/exec";
+    const GAS_URL = "https://script.google.com/macros/s/AKfycby8s6DKAGqcZqk9_cUyCC-L_vx90AkWX380JZeFXfYLyTG9HWz2yNnBf_JKQ2jR9Gu5/exec";
     
     // 打包資料發送 (注意 type=river)
     const requestUrl = `${GAS_URL}?type=river&label=${encodeURIComponent(label)}&score=${score}`;
