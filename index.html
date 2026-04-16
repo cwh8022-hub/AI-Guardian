@@ -1,17 +1,120 @@
-function saveRiverData(label, score) {
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>淡水河 AI 守護者</title>
+  
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.3.1/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@0.8/dist/teachablemachine-image.min.js"></script>
+
+  <style>
+    body { font-family: -apple-system, sans-serif; background: #1a1a2e; color: white; text-align: center; margin: 0; padding: 20px; }
+    h2 { color: #00d2ff; margin-bottom: 5px; }
+    #webcam-container { width: 280px; height: 280px; margin: 20px auto; border-radius: 20px; overflow: hidden; border: 3px solid #2ecc71; background: #000; box-shadow: 0 0 15px rgba(46, 204, 113, 0.3); }
+    canvas { width: 100%; height: 100%; object-fit: cover; }
+    .action-btn { width: 90%; max-width: 300px; padding: 18px; border-radius: 50px; border: none; font-size: 18px; font-weight: bold; color: white; cursor: pointer; margin: 10px 0; transition: 0.3s; }
+    #btn-init { background: #3498db; }
+    #btn-save { background: #e74c3c; display: none; }
+    #status { font-size: 16px; color: #f1c40f; margin-top: 10px; min-height: 30px; }
+    #label-container { margin-top: 10px; font-size: 22px; color: white; font-weight: bold; }
+  </style>
+</head>
+<body>
+
+  <h2>🌊 淡水河 AI 守護者</h2>
+  <div id="status">準備就緒，請啟動系統</div>
+
+  <div id="webcam-container"></div>
+  <div id="label-container">等待辨識...</div>
+
+  <button id="btn-init" class="action-btn" onclick="init()">📸 1. 啟動環境掃描鏡頭</button>
+  <button id="btn-save" class="action-btn" onclick="triggerSave()">🚨 2. 紀錄目前畫面垃圾</button>
+
+<script>
+  // 🔴 這裡請貼上您原本的「淡水河垃圾圖片辨識」模型網址
+  const URL = "https://teachablemachine.withgoogle.com/models/請替換成您的模型ID/";
+  
+  // 🔴 您的專屬 GAS API 網址
+  const GAS_URL = "https://script.google.com/macros/s/AKfycby8s6DKAGqcZqk9_cUyCC-L_vx90AkWX380JZeFXfYLyTG9HWz2yNnBf_JKQ2jR9Gu5/exec";
+  
+  let model, webcam, labelContainer, maxPredictions;
+  let currentLabel = "", currentScore = 0;
+
+  async function init() {
+    const status = document.getElementById("status");
+    const btnInit = document.getElementById("btn-init");
+    btnInit.innerHTML = "⏳ 模型載入中...";
+    btnInit.disabled = true;
+
+    try {
+      model = await tmImage.load(URL + "model.json", URL + "metadata.json");
+      maxPredictions = model.getTotalClasses();
+
+      const flip = false; // 後置鏡頭不反轉
+      webcam = new tmImage.Webcam(280, 280, flip);
+      await webcam.setup({ facingMode: "environment" }); 
+      if(webcam.webcam) { webcam.webcam.setAttribute('playsinline', ''); webcam.webcam.muted = true; }
+      
+      await webcam.play();
+      window.requestAnimationFrame(loop);
+
+      document.getElementById("webcam-container").appendChild(webcam.canvas);
+      labelContainer = document.getElementById("label-container");
+
+      btnInit.style.display = "none";
+      document.getElementById("btn-save").style.display = "inline-block";
+      status.innerText = "✅ 掃描中，請對準目標";
+      status.style.color = "#2ecc71";
+    } catch (e) {
+      status.innerHTML = `❌ 啟動失敗，請確認已允許相機權限。`;
+      btnInit.disabled = false; btnInit.innerHTML = "重試啟動";
+    }
+  }
+
+  async function loop() {
+    webcam.update();
+    await predict();
+    window.requestAnimationFrame(loop);
+  }
+
+  async function predict() {
+    const prediction = await model.predict(webcam.canvas);
+    let best = prediction.reduce((a, b) => a.probability > b.probability ? a : b);
+    
+    currentLabel = best.className;
+    currentScore = best.probability.toFixed(2);
+    
+    labelContainer.innerText = `${currentLabel} (${(currentScore * 100).toFixed(0)}%)`;
+  }
+
+  function triggerSave() {
+    // 若信心度太低，不給存檔
+    if (currentScore < 0.6) {
+      alert("⚠️ 系統無法確認，請靠近一點再紀錄！");
+      return;
+    }
+    saveRiverData(currentLabel, currentScore);
+  }
+
+  function saveRiverData(label, score) {
     document.getElementById("status").innerText = "💾 紀錄上傳中...";
+    document.getElementById("btn-save").disabled = true;
     
-    // 🔴 貼上同一個 GAS API 網址 🔴
-    const GAS_URL = "https://script.google.com/macros/s/AKfycby8s6DKAGqcZqk9_cUyCC-L_vx90AkWX380JZeFXfYLyTG9HWz2yNnBf_JKQ2jR9Gu5/exec";
-    
-    // 打包資料發送 (注意 type=river)
     const requestUrl = `${GAS_URL}?type=river&label=${encodeURIComponent(label)}&score=${score}`;
     
-    fetch(requestUrl)
-      .then(response => response.json())
-      .then(data => {
-        alert("垃圾紀錄已上傳成功！");
-        // 恢復掃描狀態或重新整理
+    fetch(requestUrl, { mode: 'no-cors' })
+      .then(() => {
+        alert("✅ 垃圾紀錄已成功上傳至試算表！");
+        document.getElementById("status").innerText = "✅ 掃描中，請對準目標";
+        document.getElementById("btn-save").disabled = false;
       })
-      .catch(error => alert("傳送失敗！"));
+      .catch(error => {
+        alert("傳送失敗！請檢查網路連線。");
+        document.getElementById("status").innerText = "❌ 傳送失敗";
+        document.getElementById("btn-save").disabled = false;
+      });
   }
+</script>
+</body>
+</html>
